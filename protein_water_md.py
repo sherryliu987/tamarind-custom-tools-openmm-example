@@ -124,7 +124,31 @@ integrator = mm.LangevinIntegrator(
 )
 integrator.setConstraintTolerance(1e-5)
 
-simulation = app.Simulation(prmtop.topology, system, integrator)
+# ---------- Require CUDA GPU ----------
+try:
+    platform = mm.Platform.getPlatformByName('CUDA')
+except Exception as e:
+    print(f"ERROR: CUDA platform not available in OpenMM: {e}")
+    sys.exit(1)
+platform_props = {'Precision': 'mixed', 'DeterministicForces': 'true'}
+
+simulation = app.Simulation(prmtop.topology, system, integrator, platform, platform_props)
+used_platform = simulation.context.getPlatform().getName()
+print(f"OpenMM platform in use: {used_platform}")
+if used_platform != 'CUDA':
+    print(f"ERROR: expected CUDA platform, got {used_platform}")
+    sys.exit(1)
+try:
+    nvsmi = subprocess.run(
+        ['nvidia-smi', '--query-gpu=name,driver_version,memory.total',
+         '--format=csv,noheader'],
+        capture_output=True, text=True, check=True,
+    )
+    print(f"nvidia-smi: {nvsmi.stdout.strip()}")
+except Exception as e:
+    print(f"ERROR: nvidia-smi failed, no GPU detected: {e}")
+    sys.exit(1)
+
 simulation.context.setPositions(inpcrd.positions)
 if inpcrd.boxVectors is not None:
     simulation.context.setPeriodicBoxVectors(*inpcrd.boxVectors)

@@ -9,7 +9,6 @@ RUN micromamba install -y -n base -c conda-forge \
     pdbfixer \
     mdtraj \
     ambertools \
-    pytraj \
     numpy \
     pandas \
     matplotlib \
