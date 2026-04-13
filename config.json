@@ -9,7 +9,7 @@
     "Post-processes the production trajectory with PBC correction, Cα alignment, and downsampling for analysis.",
     "Computes Cα RMSD, radius of gyration, per-residue RMSF, 2D RMSD, and residue-wise Pearson cross-correlation, saving plots and CSVs."
   ],
-  "gpu": "T4",
+  "gpuType": "T4",
   "inputs": [
     {
       "name": "protein",
