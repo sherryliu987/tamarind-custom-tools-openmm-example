@@ -44,6 +44,7 @@ os.makedirs('out', exist_ok=True)
 os.makedirs('out/analysis', exist_ok=True)
 
 print("V4 config test")
+print("V5 config test")
 
 # ---------- Locate input protein ----------
 candidates = sorted(glob.glob('inputs/*.pdb') + glob.glob('inputs/*.cif'))
