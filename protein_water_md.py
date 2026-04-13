@@ -43,6 +43,8 @@ production_steps = int(production_time * 1_000_000 / timestep)
 os.makedirs('out', exist_ok=True)
 os.makedirs('out/analysis', exist_ok=True)
 
+print("V4 config test")
+
 # ---------- Locate input protein ----------
 candidates = sorted(glob.glob('inputs/*.pdb') + glob.glob('inputs/*.cif'))
 if not candidates:
