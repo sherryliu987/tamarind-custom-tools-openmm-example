@@ -70,7 +70,13 @@ if not candidates:
 input_protein = candidates[0]
 print(f"Input protein: {input_protein}")
 
-# ---------- Prepare system with PDBFixer ----------
+# ---------- Prepare system (PDBFixer + pdb4amber + tleap) ----------
+# Mirrors tamarind-utils/tool_scripts/run-openmm.sh: PDBFixer repairs residues,
+# pdb4amber strips hydrogens/waters/CONECT records so tleap can apply Amber
+# atom types cleanly, then a probe tleap run computes net charge so we can
+# neutralize + add salt to the requested ionic strength.
+os.makedirs('prep', exist_ok=True)
+
 print("Running PDBFixer...")
 fixer = PDBFixer(filename=input_protein)
 fixer.findMissingResidues()
@@ -81,30 +87,103 @@ fixer.findMissingAtoms()
 fixer.addMissingAtoms()
 fixer.addMissingHydrogens(ph)
 
-with open('out/protein_fixed_h.pdb', 'w') as f:
+with open('prep/protein_fixed.pdb', 'w') as f:
     app.PDBFile.writeFile(fixer.topology, fixer.positions, f, keepIds=True)
 
-# tleap/ff14SB uses Amber-specific H naming (H1/H2/H3 at N-terminus). Strip
-# hydrogens here and let tleap re-add them under its own naming convention.
-_traj_fix = md.load('out/protein_fixed_h.pdb')
-_heavy = _traj_fix.atom_slice(_traj_fix.topology.select('not element H'))
-_heavy.save_pdb('out/protein_fixed.pdb')
+print("Cleaning protein with pdb4amber...")
+subprocess.run(
+    ['pdb4amber', '-i', 'prep/protein_fixed.pdb',
+     '-o', 'prep/protein_clean.pdb', '--nohyd', '--dry'],
+    check=True,
+)
+for stray in ('prep/protein_clean_nonprot.pdb',
+              'prep/protein_clean_sslink',
+              'prep/protein_clean_water.pdb'):
+    if os.path.exists(stray):
+        os.remove(stray)
 
-# ---------- Parameterize with tleap (Amber ff14SB + TIP3P) ----------
-print("Building topology with tleap...")
-tleap_in = f"""source leaprc.protein.ff14SB
+PROTEIN_FF = 'leaprc.protein.ff14SB'
+box_angstrom = padding_nm * 10.0
+
+# Probe run: compute net charge so we know which counter-ion to neutralize with
+probe_in = f"""source {PROTEIN_FF}
 source leaprc.water.tip3p
-mol = loadpdb out/protein_fixed.pdb
-solvateBox mol TIP3PBOX {padding_nm * 10.0}
-addIonsRand mol Na+ 0
-addIonsRand mol Cl- 0
-saveAmberParm mol out/system.prmtop out/system.inpcrd
-savepdb mol out/system.pdb
+system = loadpdb prep/protein_clean.pdb
+charge system
 quit
 """
-with open('out/tleap.in', 'w') as f:
-    f.write(tleap_in)
-subprocess.run(['tleap', '-f', 'out/tleap.in'], check=True)
+with open('prep/_probe.leap.in', 'w') as f:
+    f.write(probe_in)
+probe = subprocess.run(
+    ['tleap', '-f', 'prep/_probe.leap.in'],
+    check=True, capture_output=True, text=True,
+)
+probe_out = probe.stdout + probe.stderr
+net_charge = 0.0
+for line in probe_out.splitlines():
+    if 'Total unperturbed charge:' in line:
+        try:
+            net_charge = float(line.split(':')[-1].strip().split()[0])
+        except (ValueError, IndexError):
+            pass
+print(f"Net charge of solute: {net_charge:.4f}")
+
+if net_charge > 0.5:
+    counter_ion = 'Cl-'
+elif net_charge < -0.5:
+    counter_ion = 'Na+'
+else:
+    counter_ion = ''
+print(f"Counter-ion for neutralization: {counter_ion or '<none needed>'}")
+
+# Neutral-only run: solvate + neutralize so we can measure the box volume and
+# pick the right number of salt pairs for the requested ionic strength.
+neutral_in = f"""source {PROTEIN_FF}
+source leaprc.water.tip3p
+system = loadpdb prep/protein_clean.pdb
+solvatebox system TIP3PBOX {box_angstrom}
+{f'addIonsRand system {counter_ion} 0' if counter_ion else ''}
+charge system
+check system
+quit
+"""
+with open('prep/_neutral.leap.in', 'w') as f:
+    f.write(neutral_in)
+neutral = subprocess.run(
+    ['tleap', '-f', 'prep/_neutral.leap.in'],
+    check=True, capture_output=True, text=True,
+)
+box_volume_a3 = 0.0
+for line in (neutral.stdout + neutral.stderr).splitlines():
+    if 'Volume:' in line:
+        try:
+            box_volume_a3 = float(line.split('Volume:')[-1].strip().split()[0])
+        except (ValueError, IndexError):
+            pass
+print(f"Box volume (A^3): {box_volume_a3:.1f}")
+
+# Concentration (M) -> ion pairs: N = V[A^3] * Nav * 1e-27 * C[M]
+n_pairs = int(round(box_volume_a3 * 6.02214e-4 * ionic_strength))
+print(f"Ion pairs to add for {ionic_strength} M: {n_pairs}")
+
+# Final run: solvate, neutralize, add salt, save prmtop/inpcrd
+final_in = f"""source {PROTEIN_FF}
+source leaprc.water.tip3p
+system = loadpdb prep/protein_clean.pdb
+solvatebox system TIP3PBOX {box_angstrom}
+{f'addIons2 system {counter_ion} 0' if counter_ion else ''}
+addIonsRand system Na+ {n_pairs} Cl- {n_pairs} 4
+charge system
+check system
+savepdb system out/system.pdb
+saveAmberParm system out/system.prmtop out/system.inpcrd
+quit
+"""
+with open('prep/_system.leap.in', 'w') as f:
+    f.write(final_in)
+subprocess.run(['tleap', '-f', 'prep/_system.leap.in'], check=True)
+if os.path.exists('leap.log'):
+    os.replace('leap.log', 'prep/leap.log')
 
 # ---------- Load into OpenMM ----------
 prmtop = app.AmberPrmtopFile('out/system.prmtop')
