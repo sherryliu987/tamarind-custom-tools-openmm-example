@@ -11,6 +11,7 @@ RUN micromamba install -y -n base -c conda-forge \
     mdtraj \
     ambertools \
     numpy \
+    scipy \
     pandas \
     matplotlib \
     seaborn \
