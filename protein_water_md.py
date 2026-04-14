@@ -67,8 +67,14 @@ fixer.findMissingAtoms()
 fixer.addMissingAtoms()
 fixer.addMissingHydrogens(ph)
 
-with open('out/protein_fixed.pdb', 'w') as f:
+with open('out/protein_fixed_h.pdb', 'w') as f:
     app.PDBFile.writeFile(fixer.topology, fixer.positions, f, keepIds=True)
+
+# tleap/ff14SB uses Amber-specific H naming (H1/H2/H3 at N-terminus). Strip
+# hydrogens here and let tleap re-add them under its own naming convention.
+_traj_fix = md.load('out/protein_fixed_h.pdb')
+_heavy = _traj_fix.atom_slice(_traj_fix.topology.select('not element H'))
+_heavy.save_pdb('out/protein_fixed.pdb')
 
 # ---------- Parameterize with tleap (Amber ff14SB + TIP3P) ----------
 print("Building topology with tleap...")
