@@ -43,10 +43,24 @@ production_steps = int(production_time * 1_000_000 / timestep)
 os.makedirs('out', exist_ok=True)
 os.makedirs('out/analysis', exist_ok=True)
 
-print("V4 config test")
-print("V5 config test")
-print("V3")
-print("Test auto publish")
+# ---------- Fail fast if no GPU ----------
+print("Checking GPU availability...")
+try:
+    nvsmi = subprocess.run(
+        ['nvidia-smi', '--query-gpu=name,driver_version,memory.total',
+         '--format=csv,noheader'],
+        capture_output=True, text=True, check=True,
+    )
+    print(f"nvidia-smi: {nvsmi.stdout.strip()}")
+except Exception as e:
+    print(f"ERROR: nvidia-smi failed, no GPU detected: {e}")
+    sys.exit(1)
+try:
+    _cuda_platform = mm.Platform.getPlatformByName('CUDA')
+    print(f"OpenMM CUDA platform available (version {_cuda_platform.getOpenMMVersion()})")
+except Exception as e:
+    print(f"ERROR: OpenMM CUDA platform not available: {e}")
+    sys.exit(1)
 
 # ---------- Locate input protein ----------
 candidates = sorted(glob.glob('inputs/*.pdb') + glob.glob('inputs/*.cif'))
