@@ -5,7 +5,7 @@ WORKDIR /app
 
 RUN micromamba install -y -n base -c conda-forge \
     python=3.10 \
-    setuptools \
+    "setuptools<81" \
     openmm=8.1 \
     pdbfixer \
     mdtraj \
